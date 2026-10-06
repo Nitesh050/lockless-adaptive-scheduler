@@ -1,5 +1,5 @@
 {
-  "name": "shifting-adaptive",
+  "name": "uniform-adaptive",
   "repeats": 10,
   "scheduler": {
     "workers": 8,
@@ -18,12 +18,8 @@
     }
   },
   "workload": {
-    "type": "shifting",
+    "type": "uniform",
     "tasks": 100000,
-    "taskMicros": 10,
-    "shiftAtFraction": 0.5,
-    "heavyEveryNth": 8,
-    "heavyOffset": 1,
-    "heavyMultiplier": 10
+    "taskMicros": 10
   }
 }

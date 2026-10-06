@@ -164,10 +164,23 @@ Batch size is the lever (no-wait, uniform workload):
 Fibonacci is insensitive to batch size: every worker that runs a node spawns its own
 children, so work is created everywhere and steals are rarely needed.
 
+A **steal-half** policy, where the victim hands over half its queue, was added and measured
+(7 repeats each):
+
+| | Round-robin | Wait steal-1 | Wait steal-half | No-wait steal-1 | No-wait steal-half | ForkJoinPool |
+|---|---|---|---|---|---|---|
+| Uniform | 145 ms | 464 ms | **138.5 ms** | 491 ms | 140 ms | 139 ms |
+| Fibonacci | 194 ms | 197 ms | 190 ms | 199 ms | **187 ms** | 179 ms |
+
+**Decision (2026-10-06): the stealing modes stay the paper's steal-1/steal-2.** Steal-half is
+never worse than round-robin on these workloads, so with it there is little for an adaptive
+controller to do, and the reimplementation would no longer be X-OpenMP's. Steal-half stays
+available (`"stealBatch": "half"`) and is reported as a separate finding: steal granularity
+removes most of the gap between the two families.
+
 Implications:
 - **Steal granularity matters as much as the choice of strategy** when work starts
-  concentrated on one worker. A "steal half" variant would likely match round-robin here.
-  Whether to add one depends on what the paper's steal-1/steal-2 mean (paper-notes.md).
+  concentrated on one worker.
 - **For the adaptive controller (Phase 3):** this is the "balanced work, stealing is wasted
   effort" case. Its signature in the signals is a high steal attempt rate, steals moving
   little work each, and thieves idle most of the time.
@@ -202,24 +215,112 @@ per-worker created/completed counters and a double-scan termination check (Matte
 four-counter method). Do **not** just swap in a `LongAdder`: its sum is not atomic and can
 read zero falsely.
 
-## Adaptive controller signals
+## Adaptive controller
 
-The engine provides `SignalSource`. Its snapshot contains:
+Lives in `sched-adaptive` and depends only on `sched-common`. `AdaptiveController` is a
+monitor thread. Every `sampleIntervalMillis` (default 5 ms) it:
 
-- queue lengths per worker, read approximately without stopping the workers
-- the number of idle workers
-- cumulative steal attempts and successes, taken from the counting `MetricsSink` wrapper the
-  engine hands to strategies
-- completed tasks
+1. takes a `SignalSnapshot` from the engine;
+2. turns it into `Signals` with `SignalCollector`;
+3. asks `DecisionRule` what to do;
+4. flips the `ModeFlag` if the rule says so.
 
-The controller computes rates from the difference between two snapshots. No steals happen
-in static round-robin, so the decision to leave it must come from imbalance and idleness
-alone.
+Every sample is logged, and the CLI writes the log to `adaptive-<n>.csv`.
 
-## Resources
+**Signals** (per sample):
+- **imbalance:** max ÷ mean queue length
+- **queued:** tasks waiting in all queues
+- **idle ratio:** fraction of workers with empty queues
+- **utilization:** 1 − idle ratio
+- **steal attempts and successes in the interval**
+- **tasks completed in the interval**
 
-Tasks call `ctx.acquire(name)`, which blocks the worker while the task waits; that is a
-documented limitation. Before blocking, the resource manager checks the wait-for graph. If
-the request would close a cycle, the chosen victim gets a `DeadlockException`. When a task
-ends, the engine releases everything it still holds. `tryAcquire` is the non-blocking
-alternative.
+Queue lengths are read without stopping the workers, so they are approximate. No steals
+happen in round-robin, so leaving round-robin is decided from imbalance and idleness alone.
+
+**Why signals alone are not enough.** In the shifting workload's lopsided phase, round-robin
+looks bad (one worker buried, the rest idle), so a pure threshold rule switches to stealing.
+But steal-1 is measurably *worse* there, because a victim can hand over at most one task per
+scheduling point. So the rule treats every switch as an experiment.
+
+**Decision rule** (`DecisionRule`):
+
+1. **Trigger.**
+   - From round-robin: workers are *starving* (idle ratio ≥ `idleRatioHigh` while at least
+     one task per worker is queued) and the work is concentrated (imbalance ≥
+     `imbalanceEnter`). Try no-wait stealing if imbalance ≥ 2 × `imbalanceEnter`, wait-based
+     otherwise.
+   - From stealing: starving (thieves aren't getting the queued work), or balanced
+     (imbalance ≤ `imbalanceExit`) with failing steals (success rate ≤ `stealSuccessLow`).
+     Try round-robin.
+   - The trigger must hold for `consecutiveSamples × penalty` samples in a row, and at least
+     `consecutiveSamples` samples since the last switch. This is the hysteresis.
+2. **Trial.** Switch, then compare mean utilization over the next 2 × `consecutiveSamples`
+   samples with the same-length window before the switch. Utilization is used rather than
+   tasks/s because it does not depend on task size.
+3. **Verdict.**
+   - If utilization fell by more than 5%, **revert** and double the penalty (up to 32×), so a
+     losing mode is probed exponentially less often.
+   - Otherwise **keep** the new mode and reset the penalty to 1.
+
+### Results (8 workers, steal-1, 7 repeats per configuration, back to back)
+
+| Workload | Round-robin | Wait steal-1 | No-wait steal-1 | **Adaptive** | Switches per run |
+|---|---|---|---|---|---|
+| Shifting (ideal 195 ms) | 468 ms | 780 ms | 869 ms | **383–388 ms** | 5–8 |
+| Uniform (ideal 125 ms) | 143.4 ms | 473 ms | 499 ms | **142.7 ms** | 0–1 |
+| Fibonacci (ideal 152 ms) | 195.0 ms | 197 ms | 197 ms | **196.3 ms** | 0 |
+
+- **Shifting:** adaptive is about **18% faster than the best fixed strategy** (round-robin),
+  and about 2× faster than stealing. Its slowest repeat (434 ms) beat round-robin's fastest
+  (466 ms).
+- **Uniform and Fibonacci:** adaptive matches the best fixed strategy to within 1%, with
+  almost no switches.
+
+The same comparison under JMH (`StrategyBenchmark`, `ForkJoinBaseline`; 2 warm-up + 5
+measured runs each):
+
+| Workload | Round-robin | Wait steal-1 | No-wait steal-1 | **Adaptive** | Java ForkJoinPool |
+|---|---|---|---|---|---|
+| Shifting | 467 ms | 787 ms | 847 ms | **393 ms** | 216 ms |
+| Uniform | 142.9 ms | 487 ms | 499 ms | 143.7 ms | 143 ms |
+| Fibonacci | 195.5 ms | 196 ms | 196 ms | 194.9 ms | 180 ms |
+
+- **Cost of the monitor** (`OverheadBenchmark`, 8 workers, 50k empty tasks): 512.5 ns per
+  task without the controller and 513.8 ns with it. The difference is within the error bars.
+- **ForkJoinPool is still faster on shifting** (216 ms). Its thieves take work straight from
+  a victim's deque with a CAS, which is what the SPSC design rules out. Steal-half closes most
+  of that gap (about 220 ms, see above), but the decision was to keep the paper's steal-1.
+
+**Why adaptive beats both fixed strategies on shifting.** The log shows it trying stealing
+early and reverting (stealing loses in the balanced phase). In the lopsided phase it moves to
+no-wait stealing and keeps it. By then, round-robin has already spread most of the tasks
+across all workers' queues, so thieves have many victims to take from, not just the spawning
+worker. Stealing then drains the worker that holds the heavy tasks: worker 1 ran about 9,400
+tasks instead of 12,500. Neither strategy alone does both, which is exactly the case adaptive
+switching is for.
+
+## Resources and deadlock detection
+
+`sched-resources`: `DefaultResourceManager`, `AllocationGraph`, `DeadlockDetector`. The engine
+reaches them only through the `ResourceManager` interface, and `sched-cli` wires them in.
+
+- **Single-instance named resources.** `AllocationGraph` records who holds each resource and
+  which resource each blocked task waits for. Following "waits for → held by" edges gives the
+  wait-for graph.
+- **Detection on every blocking request.** A new wait edge can only create a cycle through
+  the task that added it, so `DeadlockDetector.cycleThrough(requester)` finds every deadlock
+  the moment it forms. Because each blocked task waits for exactly one resource, this is
+  just following a path, O(length of the chain). With single-instance resources, a cycle is
+  necessary and sufficient for deadlock.
+- **Recovery: abort the requester.** It gets a `DeadlockException` instead of blocking. When
+  its task ends, the engine releases everything it holds, which breaks the cycle. The report
+  lists the tasks and resources on the cycle.
+- **Lock-based on purpose.** This is the classic OS part, not the lock-free hot path. Only
+  tasks that use resources call it, and a blocked task blocks its worker thread (a documented
+  limitation). `tryAcquire` never blocks.
+- **Not implemented:** the Banker's algorithm (avoidance), which was first on the cut list.
+
+**Demo** (`experiments/deadlock-demo.json`): dining philosophers, 5 tasks, 20 meals each.
+Each run detected and broke 7–11 five-way cycles (for example tasks 5→1→2→3→4 on
+fork-0…fork-4), and all 100 meals were eaten.

@@ -66,13 +66,34 @@ class MainTest {
     }
 
     @Test
-    void rejectsAdaptiveUntilPhase3(@TempDir Path dir) throws Exception {
+    void adaptiveRunWritesTheControllerLog(@TempDir Path dir) throws Exception {
         Path cfg = dir.resolve("adaptive.json");
         Files.writeString(cfg, """
-                {"name": "a", "scheduler": {"adaptive": true}, "workload": {"type": "uniform", "tasks": 1, "taskMicros": 0}}
+                {"name": "a", "repeats": 1,
+                 "scheduler": {"workers": 4, "adaptive": true, "queueCapacity": 256,
+                               "thresholds": {"sampleIntervalMillis": 1, "consecutiveSamples": 2, "imbalanceEnter": 2.0,
+                                              "imbalanceExit": 1.3, "stealSuccessLow": 0.2, "idleRatioHigh": 0.25}},
+                 "workload": {"type": "shifting", "tasks": 20000, "taskMicros": 5, "shiftAtFraction": 0.5,
+                              "heavyEveryNth": 4, "heavyOffset": 1, "heavyMultiplier": 10}}
                 """);
-        assertThrows(UnsupportedOperationException.class,
-                () -> Main.run(Main.Args.parse(new String[] {"--config", cfg.toString(), "--out", dir.toString()})));
+        Path out = dir.resolve("out");
+        assertTrue(Main.run(Main.Args.parse(new String[] {"--config", cfg.toString(), "--out", out.toString(), "--trace"})));
+
+        List<String> log = Files.readAllLines(out.resolve("adaptive-1.csv"));
+        assertTrue(log.size() > 5, "controller should have sampled several times, got " + log.size());
+        assertTrue(log.get(0).startsWith("time_ms,mode,imbalance"));
+        assertTrue(Files.exists(out.resolve("trace-1.csv")));
+        assertTrue(Files.exists(out.resolve("modes-1.csv")));
+    }
+
+    @Test
+    void stealBatchAcceptsHalf(@TempDir Path dir) throws Exception {
+        Path cfg = dir.resolve("half.json");
+        Files.writeString(cfg, """
+                {"name": "h", "scheduler": {"workers": 2, "initialMode": "NO_WAIT_STEAL", "stealBatch": "half"},
+                 "workload": {"type": "uniform", "tasks": 500, "taskMicros": 0}}
+                """);
+        assertTrue(Main.run(Main.Args.parse(new String[] {"--config", cfg.toString(), "--out", dir.resolve("o").toString()})));
     }
 
     @Test

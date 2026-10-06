@@ -1,5 +1,7 @@
 package io.github.nitesh050.sched.cli;
 
+import io.github.nitesh050.sched.adaptive.AdaptiveController;
+import io.github.nitesh050.sched.common.api.MetricsSink;
 import io.github.nitesh050.sched.common.api.SchedulingStrategy;
 import io.github.nitesh050.sched.common.api.Workload;
 import io.github.nitesh050.sched.common.config.SchedulerConfig;
@@ -13,6 +15,8 @@ import io.github.nitesh050.sched.metrics.MetricsSinks;
 import io.github.nitesh050.sched.metrics.TraceRecorder;
 import io.github.nitesh050.sched.metrics.WorkerMetrics;
 import io.github.nitesh050.sched.queue.QueueType;
+import io.github.nitesh050.sched.resources.DefaultResourceManager;
+import io.github.nitesh050.sched.workloads.DeadlockScenario;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -38,7 +42,8 @@ public final class Main {
             "experiment", "repeat", "workload", "mode", "adaptive", "workers", "queue",
             "completed", "tasks_executed", "elapsed_ms", "throughput_per_s",
             "inline_executions", "failed", "duplicate_claims",
-            "steal_attempts", "steal_successes", "steal_success_rate", "imbalance_spread", "imbalance_cv");
+            "steal_attempts", "steal_successes", "steal_success_rate", "imbalance_spread", "imbalance_cv",
+            "mode_switches");
 
     private static final long TRACE_BUCKET_NANOS = 1_000_000;
 
@@ -69,13 +74,10 @@ public final class Main {
         int repeats = a.repeats != null ? a.repeats : exp.repeats();
         Path out = a.out != null ? a.out : Path.of("results", exp.name());
 
-        if (config.adaptive()) {
-            throw new UnsupportedOperationException("adaptive runs are not implemented yet (Phase 3)");
-        }
         int stealBatch = exp.scheduler().stealBatchOrDefault();
 
-        System.out.printf(Locale.ROOT, "%s: %d workers, %s%s, %s queues, %d repeat(s) -> %s%n",
-                exp.name(), config.workers(), config.initialMode(),
+        System.out.printf(Locale.ROOT, "%s: %d workers, %s%s%s, %s queues, %d repeat(s) -> %s%n",
+                exp.name(), config.workers(), config.adaptive() ? "adaptive from " : "", config.initialMode(),
                 stealBatch == 1 ? "" : " (batch " + (stealBatch == 0 ? "half" : stealBatch) + ")",
                 a.queue.name().toLowerCase(Locale.ROOT), repeats, out);
 
@@ -88,8 +90,11 @@ public final class Main {
             TraceRecorder trace = a.trace
                     ? new TraceRecorder(config.workers(), TRACE_BUCKET_NANOS, a.timeout.toNanos())
                     : null;
+            MetricsSink sink = trace == null ? metrics : MetricsSinks.fanOut(metrics, trace);
+            DefaultResourceManager resources = new DefaultResourceManager();
             WorkerPool.Builder builder = WorkerPool.builder(config)
-                    .metrics(trace == null ? metrics : MetricsSinks.fanOut(metrics, trace))
+                    .metrics(sink)
+                    .resourceManager(resources)
                     .queueType(a.queue)
                     .trackTasks(false);
             for (SchedulingStrategy s : Strategies.all(config, stealBatch)) {
@@ -100,7 +105,19 @@ public final class Main {
             if (trace != null) {
                 trace.start();
             }
-            RunResult result = pool.run(workload, a.timeout);
+            AdaptiveController controller = config.adaptive()
+                    ? new AdaptiveController(pool.signalSource(), pool.modeFlag(), config.thresholds(), sink)
+                    : null;
+            RunResult result;
+            if (controller == null) {
+                result = pool.run(workload, a.timeout);
+            } else {
+                try (controller) {
+                    controller.start();
+                    result = pool.run(workload, a.timeout);
+                }
+                Reports.writeControllerLog(out.resolve("adaptive-" + r + ".csv"), controller);
+            }
             MetricsReport report = metrics.report();
 
             long expected = workload.expectedTaskCount().orElse(result.tasksExecuted());
@@ -111,12 +128,20 @@ public final class Main {
             long[] perWorker = result.perWorkerExecuted();
             long stealAttempts = report.total(WorkerMetrics::stealAttempts);
             long stealSuccesses = report.total(WorkerMetrics::stealSuccesses);
-            System.out.printf(Locale.ROOT, "  repeat %2d: %9.2f ms  %,12.0f tasks/s  spread %.3f  steals %d/%d  per-worker %s%s%n",
+            System.out.printf(Locale.ROOT, "  repeat %2d: %9.2f ms  %,12.0f tasks/s  spread %.3f  steals %d/%d%s  per-worker %s%s%n",
                     r, result.elapsedMillis(), result.throughput(),
                     DeltaCalculator.relativeSpread(perWorker), stealSuccesses, stealAttempts,
+                    controller == null ? "" : "  switches " + controller.switches(),
                     Arrays.toString(perWorker),
                     clean ? "" : "  <-- NOT CLEAN: " + describeProblem(result, expected));
             result.errors().stream().limit(3).forEach(e -> System.out.println("      " + e));
+            if (resources.deadlocksDetected() > 0) {
+                System.out.printf(Locale.ROOT, "      deadlocks detected and broken: %d; first: %s%n",
+                        resources.deadlocksDetected(), resources.reports().get(0));
+            }
+            if (workload instanceof DeadlockScenario d) {
+                System.out.printf(Locale.ROOT, "      meals eaten: %d%n", d.mealsEaten());
+            }
 
             rows.add(List.of(exp.name(), r, workload.name(), config.initialMode(), config.adaptive(),
                     config.workers(), a.queue.name().toLowerCase(Locale.ROOT), result.completed(),
@@ -126,7 +151,8 @@ public final class Main {
                     stealAttempts, stealSuccesses,
                     Double.isNaN(report.stealSuccessRate()) ? "" : String.format(Locale.ROOT, "%.4f", report.stealSuccessRate()),
                     String.format(Locale.ROOT, "%.4f", DeltaCalculator.relativeSpread(perWorker)),
-                    String.format(Locale.ROOT, "%.4f", DeltaCalculator.coefficientOfVariation(perWorker))));
+                    String.format(Locale.ROOT, "%.4f", DeltaCalculator.coefficientOfVariation(perWorker)),
+                    controller == null ? 0 : controller.switches()));
             CsvExporter.writeWorkers(out.resolve("workers-" + r + ".csv"), report);
             if (trace != null) {
                 trace.writeCsv(out.resolve("trace-" + r + ".csv"));

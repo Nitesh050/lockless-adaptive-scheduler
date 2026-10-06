@@ -1,7 +1,9 @@
 package io.github.nitesh050.sched.cli;
 
 import io.github.nitesh050.sched.common.api.Workload;
+import io.github.nitesh050.sched.workloads.DeadlockScenario;
 import io.github.nitesh050.sched.workloads.FibonacciTree;
+import io.github.nitesh050.sched.workloads.ShiftingWorkload;
 import io.github.nitesh050.sched.workloads.UniformWorkload;
 import java.util.Map;
 
@@ -20,14 +22,31 @@ final class Workloads {
             case "fibonacci" -> new FibonacciTree(
                     intParam(spec, "n"),
                     longParam(spec, "nodeMicros") * 1_000);
-            case "shifting", "deadlock" ->
-                    throw new UnsupportedOperationException("workload \"" + type + "\" is not implemented yet");
+            case "shifting" -> new ShiftingWorkload(
+                    intParam(spec, "tasks"),
+                    longParam(spec, "taskMicros") * 1_000,
+                    doubleParam(spec, "shiftAtFraction"),
+                    intParam(spec, "heavyEveryNth"),
+                    intParam(spec, "heavyOffset"),
+                    intParam(spec, "heavyMultiplier"));
+            case "deadlock" -> new DeadlockScenario(
+                    intParam(spec, "philosophers"),
+                    intParam(spec, "meals"),
+                    longParam(spec, "holdMicros") * 1_000);
             default -> throw new IllegalArgumentException("unknown workload type \"" + type + "\"");
         };
     }
 
     private static int intParam(Map<String, Object> spec, String key) {
         return Math.toIntExact(longParam(spec, key));
+    }
+
+    private static double doubleParam(Map<String, Object> spec, String key) {
+        Object v = spec.get(key);
+        if (!(v instanceof Number n)) {
+            throw new IllegalArgumentException("workload needs a numeric \"" + key + "\", got " + v);
+        }
+        return n.doubleValue();
     }
 
     private static long longParam(Map<String, Object> spec, String key) {

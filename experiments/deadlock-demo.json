@@ -1,0 +1,18 @@
+{
+  "name": "deadlock-demo",
+  "repeats": 3,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "STATIC_ROUND_ROBIN",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "deadlock",
+    "philosophers": 5,
+    "meals": 20,
+    "holdMicros": 200
+  }
+}
