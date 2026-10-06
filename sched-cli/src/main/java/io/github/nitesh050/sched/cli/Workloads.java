@@ -1,6 +1,7 @@
 package io.github.nitesh050.sched.cli;
 
 import io.github.nitesh050.sched.common.api.Workload;
+import io.github.nitesh050.sched.workloads.FibonacciTree;
 import io.github.nitesh050.sched.workloads.UniformWorkload;
 import java.util.Map;
 
@@ -16,7 +17,10 @@ final class Workloads {
             case "uniform" -> new UniformWorkload(
                     intParam(spec, "tasks"),
                     longParam(spec, "taskMicros") * 1_000);
-            case "fibonacci", "shifting", "deadlock" ->
+            case "fibonacci" -> new FibonacciTree(
+                    intParam(spec, "n"),
+                    longParam(spec, "nodeMicros") * 1_000);
+            case "shifting", "deadlock" ->
                     throw new UnsupportedOperationException("workload \"" + type + "\" is not implemented yet");
             default -> throw new IllegalArgumentException("unknown workload type \"" + type + "\"");
         };

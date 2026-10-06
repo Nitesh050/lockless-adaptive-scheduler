@@ -66,10 +66,10 @@ class MainTest {
     }
 
     @Test
-    void rejectsUnimplementedModesClearly(@TempDir Path dir) throws Exception {
-        Path cfg = dir.resolve("steal.json");
+    void rejectsAdaptiveUntilPhase3(@TempDir Path dir) throws Exception {
+        Path cfg = dir.resolve("adaptive.json");
         Files.writeString(cfg, """
-                {"name": "s", "scheduler": {"initialMode": "NO_WAIT_STEAL"}, "workload": {"type": "uniform", "tasks": 1, "taskMicros": 0}}
+                {"name": "a", "scheduler": {"adaptive": true}, "workload": {"type": "uniform", "tasks": 1, "taskMicros": 0}}
                 """);
         assertThrows(UnsupportedOperationException.class,
                 () -> Main.run(Main.Args.parse(new String[] {"--config", cfg.toString(), "--out", dir.toString()})));

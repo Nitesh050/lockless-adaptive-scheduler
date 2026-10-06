@@ -1,0 +1,17 @@
+{
+  "name": "uniform-nowait",
+  "repeats": 10,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "NO_WAIT_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "uniform",
+    "tasks": 100000,
+    "taskMicros": 10
+  }
+}

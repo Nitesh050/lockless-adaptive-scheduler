@@ -13,9 +13,10 @@ single-producer/single-consumer queues:
 On top of these, an adaptive controller watches queue imbalance, steal success rate and idle
 workers, and moves the whole system between the strategies while it runs.
 
-> **Status:** Phase 1 done. The engine runs end to end on the lock-free `SpscQueue` (verified
-> with jcstress) under static round-robin, and `experiments/uniform-static.json` writes CSVs.
-> Next (Phase 2): the work-stealing strategies.
+> **Status:** Phase 2 done. All three strategies (static round-robin, wait-based steal,
+> no-wait steal) run on the lock-free `SpscQueue`. The queues and the steal handshake are
+> verified with jcstress, and exactly-once execution with integration tests. Next (Phase 3):
+> the adaptive controller.
 > See [docs/architecture.md](docs/architecture.md).
 
 ## Build

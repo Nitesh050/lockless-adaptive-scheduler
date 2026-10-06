@@ -77,7 +77,22 @@ and every poll the producer's copy of `tail`.
 
 ### StealRequestCell
 
-_TODO (B)_
+The cells live in one `AtomicLongArray`, one slot every 16 longs (128 bytes), so each victim's
+cell has its own cache line.
+
+- **Every state change is a `compareAndSet`** (post, answer, decline, withdraw). Several thieves
+  can race for one victim's cell, and a thief's withdraw can race with the victim's answer.
+  CAS decides each race exactly once (`TwoThievesOneCell`, `ServeVersusWithdraw`).
+- **Reads are `getAcquire`** (`pending`, `isAnswered`).
+- **Publication of stolen tasks:** the victim pushes the task into the thief's SPSC queue,
+  which is a release of that queue's tail, and *then* CASes the answer, which is volatile and
+  so at least a release. A thief that reads the answer with acquire and then polls that queue
+  with acquire is guaranteed to see the task. jcstress `AnswerPublishesTheTask` checks the
+  forbidden outcome "answered, but the task is not visible".
+- **Correctness does not depend on the cell.** Tasks only ever move queue to queue. The cell
+  only decides whether a transfer happens, so even a protocol bug here would cost performance
+  (wasted or missed steals), not lose or duplicate tasks. Exactly-once execution rests on the
+  queues and the TCB claim CAS.
 
 ### ModeFlag
 

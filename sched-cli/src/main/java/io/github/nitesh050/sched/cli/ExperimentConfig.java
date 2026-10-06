@@ -42,7 +42,25 @@ record ExperimentConfig(String name, Integer repeats, SchedulerSection scheduler
             Integer queueCapacity,
             Long stealWaitNanos,
             Long seed,
-            AdaptiveThresholds thresholds) {
+            AdaptiveThresholds thresholds,
+            Object stealBatch) {
+
+        /**
+         * Tasks a victim hands over per request: a number (1 = steal-1, the default; 2 =
+         * steal-2) or "half" for steal-half (returned as {@code StealingStrategy.STEAL_HALF}).
+         */
+        int stealBatchOrDefault() {
+            if (stealBatch == null) {
+                return 1;
+            }
+            if (stealBatch instanceof Number n && n.intValue() >= 1) {
+                return n.intValue();
+            }
+            if ("half".equals(stealBatch)) {
+                return io.github.nitesh050.sched.strategies.StealingStrategy.STEAL_HALF;
+            }
+            throw new IllegalArgumentException("stealBatch must be a positive number or \"half\", got " + stealBatch);
+        }
 
         SchedulerConfig toConfig() {
             SchedulerConfig.Builder b = SchedulerConfig.builder();

@@ -1,14 +1,18 @@
 package io.github.nitesh050.sched.cli;
 
+import io.github.nitesh050.sched.common.api.SchedulingStrategy;
 import io.github.nitesh050.sched.common.api.Workload;
-import io.github.nitesh050.sched.common.config.Mode;
 import io.github.nitesh050.sched.common.config.SchedulerConfig;
 import io.github.nitesh050.sched.engine.RunResult;
 import io.github.nitesh050.sched.engine.WorkerPool;
 import io.github.nitesh050.sched.metrics.CsvExporter;
+import io.github.nitesh050.sched.metrics.DeltaCalculator;
 import io.github.nitesh050.sched.metrics.MetricsRegistry;
+import io.github.nitesh050.sched.metrics.MetricsReport;
+import io.github.nitesh050.sched.metrics.MetricsSinks;
+import io.github.nitesh050.sched.metrics.TraceRecorder;
+import io.github.nitesh050.sched.metrics.WorkerMetrics;
 import io.github.nitesh050.sched.queue.QueueType;
-import io.github.nitesh050.sched.strategies.StaticRoundRobin;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -21,18 +25,22 @@ import java.util.Locale;
  *
  * <pre>
  *   java -jar scheduler.jar --config experiments/uniform-static.json [--out results/uniform-static]
- *                           [--repeats N] [--queue spsc|locking] [--timeout-seconds 300]
+ *                           [--repeats N] [--queue spsc|locking] [--timeout-seconds 300] [--trace]
  * </pre>
  *
  * Output: {@code runs.csv} (one row per repeat) and {@code workers-<repeat>.csv} (one row per
- * worker) in the output directory.
+ * worker) in the output directory; with {@code --trace}, also {@code trace-<repeat>.csv}
+ * (tasks finished per worker per millisecond) and {@code modes-<repeat>.csv} (mode switches).
  */
 public final class Main {
 
     private static final List<String> RUN_HEADER = List.of(
             "experiment", "repeat", "workload", "mode", "adaptive", "workers", "queue",
             "completed", "tasks_executed", "elapsed_ms", "throughput_per_s",
-            "inline_executions", "failed", "duplicate_claims");
+            "inline_executions", "failed", "duplicate_claims",
+            "steal_attempts", "steal_successes", "steal_success_rate", "imbalance_spread", "imbalance_cv");
+
+    private static final long TRACE_BUCKET_NANOS = 1_000_000;
 
     private Main() {
     }
@@ -64,13 +72,12 @@ public final class Main {
         if (config.adaptive()) {
             throw new UnsupportedOperationException("adaptive runs are not implemented yet (Phase 3)");
         }
-        if (config.initialMode() != Mode.STATIC_ROUND_ROBIN) {
-            throw new UnsupportedOperationException(config.initialMode() + " is not implemented yet (Phase 2)");
-        }
+        int stealBatch = exp.scheduler().stealBatchOrDefault();
 
-        System.out.printf(Locale.ROOT, "%s: %d workers, %s, %s queues, %d repeat(s) -> %s%n",
-                exp.name(), config.workers(), config.initialMode(), a.queue.name().toLowerCase(Locale.ROOT),
-                repeats, out);
+        System.out.printf(Locale.ROOT, "%s: %d workers, %s%s, %s queues, %d repeat(s) -> %s%n",
+                exp.name(), config.workers(), config.initialMode(),
+                stealBatch == 1 ? "" : " (batch " + (stealBatch == 0 ? "half" : stealBatch) + ")",
+                a.queue.name().toLowerCase(Locale.ROOT), repeats, out);
 
         List<List<?>> rows = new ArrayList<>();
         double[] millis = new double[repeats];
@@ -78,23 +85,36 @@ public final class Main {
         for (int r = 1; r <= repeats; r++) {
             Workload workload = Workloads.create(exp.workload());
             MetricsRegistry metrics = new MetricsRegistry(config.workers());
-            WorkerPool pool = WorkerPool.builder(config)
-                    .strategy(new StaticRoundRobin(config.workers()))
-                    .metrics(metrics)
+            TraceRecorder trace = a.trace
+                    ? new TraceRecorder(config.workers(), TRACE_BUCKET_NANOS, a.timeout.toNanos())
+                    : null;
+            WorkerPool.Builder builder = WorkerPool.builder(config)
+                    .metrics(trace == null ? metrics : MetricsSinks.fanOut(metrics, trace))
                     .queueType(a.queue)
-                    .trackTasks(false)
-                    .build();
+                    .trackTasks(false);
+            for (SchedulingStrategy s : Strategies.all(config, stealBatch)) {
+                builder.strategy(s);
+            }
+            WorkerPool pool = builder.build();
 
+            if (trace != null) {
+                trace.start();
+            }
             RunResult result = pool.run(workload, a.timeout);
+            MetricsReport report = metrics.report();
 
             long expected = workload.expectedTaskCount().orElse(result.tasksExecuted());
             boolean clean = result.isClean() && result.tasksExecuted() == expected;
             allClean &= clean;
             millis[r - 1] = result.elapsedMillis();
 
-            System.out.printf(Locale.ROOT, "  repeat %2d: %9.2f ms  %,12.0f tasks/s  per-worker %s%s%n",
+            long[] perWorker = result.perWorkerExecuted();
+            long stealAttempts = report.total(WorkerMetrics::stealAttempts);
+            long stealSuccesses = report.total(WorkerMetrics::stealSuccesses);
+            System.out.printf(Locale.ROOT, "  repeat %2d: %9.2f ms  %,12.0f tasks/s  spread %.3f  steals %d/%d  per-worker %s%s%n",
                     r, result.elapsedMillis(), result.throughput(),
-                    Arrays.toString(result.perWorkerExecuted()),
+                    DeltaCalculator.relativeSpread(perWorker), stealSuccesses, stealAttempts,
+                    Arrays.toString(perWorker),
                     clean ? "" : "  <-- NOT CLEAN: " + describeProblem(result, expected));
             result.errors().stream().limit(3).forEach(e -> System.out.println("      " + e));
 
@@ -102,8 +122,16 @@ public final class Main {
                     config.workers(), a.queue.name().toLowerCase(Locale.ROOT), result.completed(),
                     result.tasksExecuted(), String.format(Locale.ROOT, "%.3f", result.elapsedMillis()),
                     String.format(Locale.ROOT, "%.1f", result.throughput()),
-                    result.inlineExecutions(), result.tasksFailed(), result.duplicateClaims()));
-            CsvExporter.writeWorkers(out.resolve("workers-" + r + ".csv"), metrics.report());
+                    result.inlineExecutions(), result.tasksFailed(), result.duplicateClaims(),
+                    stealAttempts, stealSuccesses,
+                    Double.isNaN(report.stealSuccessRate()) ? "" : String.format(Locale.ROOT, "%.4f", report.stealSuccessRate()),
+                    String.format(Locale.ROOT, "%.4f", DeltaCalculator.relativeSpread(perWorker)),
+                    String.format(Locale.ROOT, "%.4f", DeltaCalculator.coefficientOfVariation(perWorker))));
+            CsvExporter.writeWorkers(out.resolve("workers-" + r + ".csv"), report);
+            if (trace != null) {
+                trace.writeCsv(out.resolve("trace-" + r + ".csv"));
+                trace.writeModeSwitchesCsv(out.resolve("modes-" + r + ".csv"));
+            }
         }
         CsvExporter.write(out.resolve("runs.csv"), RUN_HEADER, rows);
 
@@ -138,6 +166,7 @@ public final class Main {
                   --repeats <n>           override the config's repeat count
                   --queue <spsc|locking>  queue implementation (default spsc)
                   --timeout-seconds <s>   declare a run hung after this long (default 300)
+                  --trace                 also write per-millisecond traces for the over-time chart
                   --help""";
 
         Path config;
@@ -146,6 +175,7 @@ public final class Main {
         QueueType queue = QueueType.SPSC;
         Duration timeout = Duration.ofSeconds(300);
         boolean help;
+        boolean trace;
 
         static Args parse(String[] argv) {
             Args a = new Args();
@@ -154,6 +184,10 @@ public final class Main {
                 if (flag.equals("--help") || flag.equals("-h")) {
                     a.help = true;
                     return a;
+                }
+                if (flag.equals("--trace")) {
+                    a.trace = true;
+                    continue;
                 }
                 if (i + 1 >= argv.length) {
                     throw new IllegalArgumentException(flag + " needs a value");

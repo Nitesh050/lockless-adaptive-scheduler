@@ -90,17 +90,87 @@ with a CAS and take ownership of the cache line, and worker 0 keeps paying misse
 allocates. If Phase 4's overhead benchmark confirms this matters, the fix is per-worker TCB
 reuse (free lists) instead of allocating every task.
 
-## Steal handshake (to be finalised by A + B in week 1)
+## Steal handshake
 
-Each worker has a `StealRequestCell`: one word that packs a round number and the thief's id.
+Implemented in `sched-strategies`: `StealRequestCell`, `StealingStrategy`, `WaitBasedSteal`,
+`NoWaitSteal`. Each worker (as victim) has one 64-bit cell, on its own cache line:
 
-1. The thief CASes its id and the current round into the victim's cell.
-2. The victim checks its cell in `onDequeue`. If there is a request, it does
-   `pollLocal()` → `pushTo(thief)` (or `pushLocal` if that push fails), then clears the cell.
-3. Wait-based: the thief spins with backoff for up to `stealWaitNanos`, watching its own
-   queue from that victim. No-wait: the thief returns at once.
+```
+[ round : 32 bits | thief + 1 : 32 bits ]        thief + 1 == 0  →  no request
+```
 
-Steal-success counts are recorded by the victim (`MetricsSink.stealSucceeded`).
+| Step | Who | Operation | Cell before → after |
+|---|---|---|---|
+| post | thief | CAS into an empty cell | `(r, none)` → `(r, thief)` |
+| serve | victim | move up to `batch` tasks: `pollLocal` → `pushTo(thief)`; then answer | — |
+| answer | victim | CAS, *after* the pushes | `(r, thief)` → `(r+1, none)` |
+| decline | victim (idle, or leaving the mode) | same as answer, with nothing pushed | `(r, thief)` → `(r+1, none)` |
+| withdraw | thief (timeout or leaving the mode) | CAS | `(r, thief)` → `(r, none)` |
+
+- **The thief never touches the victim's queues.** The victim pushes into the queue it
+  produces for the thief, so every queue keeps one producer and one consumer.
+- **Tasks never pass through the cell.** A lost CAS race can only waste an attempt; it can
+  never lose or duplicate a task. If a withdraw races with a serve, the task may already be in
+  the thief's queue. That is fine, because every mode drains all of a worker's queues
+  (checked by jcstress `StealHandshakeStress.ServeVersusWithdraw`).
+- **Answering is a release, and the thief's check is an acquire,** so a thief that sees the
+  answer also sees the pushed task (`AnswerPublishesTheTask`).
+- **The round number** distinguishes "my request was answered" from "the cell is free
+  again", even when the same thief posts again straight away.
+- **Victims check the cell** in `onSpawn` and `onDequeue`, X-OpenMP style: on their own
+  enqueue/dequeue path. A worker spawning many tasks in a row (the root task) therefore
+  still serves thieves.
+- **Idle workers decline incoming requests at once,** including while they wait as a thief
+  themselves. Two idle workers can therefore never wait on each other.
+- **Victim selection:** sample up to 4 random workers and pick the first whose queues look
+  non-empty. If all look empty, no request is posted, so idle workers don't flood each other.
+- **Both stealing strategies share one set of cells,** so a request survives a switch
+  between them.
+
+| | Thief after posting | Withdraws after |
+|---|---|---|
+| `WaitBasedSteal` | spins until answered (declining its own requests meanwhile) | `stealWaitNanos` |
+| `NoWaitSteal` | returns at once and checks again on its next idle pass | `stealWaitNanos`, then retargets |
+
+`batch` (tasks moved per request) is 1 for wait-based, and 1 ("steal-1") or 2 ("steal-2") for
+no-wait. Whether that matches the paper's steal-1/steal-2 is still to be checked; see
+paper-notes.md.
+
+Steal-success counts are recorded by the victim (`MetricsSink.stealSucceeded`), once per
+request that moved at least one task.
+
+### First measurements (Phase 2, 8 workers, Apple Silicon, machine not fully idle)
+
+| Workload | Round-robin | Wait-based (steal-1) | No-wait steal-1 | No-wait steal-2 |
+|---|---|---|---|---|
+| Uniform, 100k × 10 µs (ideal 125 ms) | **148 ms** | 472 ms | 492 ms | 261 ms |
+| Fibonacci(25), 242,785 × 5 µs (ideal 152 ms) | 198 ms | 197 ms | 197 ms | 192 ms |
+
+All runs were clean: no lost, duplicated or failed tasks.
+
+**Why stealing loses on uniform work.** All 100k tasks are spawned by the root task on worker
+0, so worker 0 is the only victim. With steal-1, every task a thief runs costs one handshake:
+worker 0 served about 61k requests, one task each, and each thief went idle after almost every
+task. Worker 0's own queue stays full, so it also runs about 38k tasks inline, and it cannot
+answer requests while doing that.
+
+Batch size is the lever (no-wait, uniform workload):
+
+| Tasks moved per steal | 1 | 2 | 8 | 32 | 128 |
+|---|---|---|---|---|---|
+| Uniform | 500 ms | 261 ms | 184 ms | 157 ms | **144 ms** |
+| Fibonacci | 199 ms | 204 ms | 191 ms | 195 ms | 200 ms |
+
+Fibonacci is insensitive to batch size: every worker that runs a node spawns its own
+children, so work is created everywhere and steals are rarely needed.
+
+Implications:
+- **Steal granularity matters as much as the choice of strategy** when work starts
+  concentrated on one worker. A "steal half" variant would likely match round-robin here.
+  Whether to add one depends on what the paper's steal-1/steal-2 mean (paper-notes.md).
+- **For the adaptive controller (Phase 3):** this is the "balanced work, stealing is wasted
+  effort" case. Its signature in the signals is a high steal attempt rate, steals moving
+  little work each, and thieves idle most of the time.
 
 ## Mode switching
 
