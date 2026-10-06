@@ -7,6 +7,30 @@ Format: `## vX — YYYY-MM-DD — summary`, then what changed, why, and who agre
 
 ---
 
+## v0.2 — 2026-10-06 — TaskControlBlock made cheaper to create
+
+- **Removed `TaskControlBlock.createdNanos()`.** Nothing read it, and calling
+  `System.nanoTime()` for every task was measurable on the spawn path. `TraceRecorder` should
+  timestamp events itself.
+- **`state` and `executedBy` are no longer `volatile` fields.** They are still only accessed
+  through VarHandles with explicit modes (CAS, acquire, release), so behaviour is unchanged.
+  Initialising a volatile field adds a full fence on ARM. That fence is unnecessary, because a
+  TCB only reaches another thread through a queue, and the queue's release/acquire publishes
+  it.
+
+Why: found while profiling the Phase 1 engine (see architecture.md, "Initial tasks").
+
+## v0.1 — 2026-10-06 — onSpawn semantics clarified (docs only, no signature change)
+
+- **`onSpawn` may answer steal requests.** X-OpenMP victims check on enqueue as well as
+  dequeue. Without this, a worker that spawns many tasks in a row never answers anyone.
+- **Spawn fallback is defined:** target queue, then own queue, then run the child
+  immediately (undeferred).
+- **Initial tasks go through `onSpawn`**, from a root task on worker 0, so strategies decide
+  the initial distribution too.
+
+Why: found while building the Phase 1 engine; B needs this for the stealing strategies.
+
 ## v0 — 2026-10-06 — initial contracts (Phase 0)
 
 Initial version of every contract. These are frozen except for `SchedulingStrategy` and

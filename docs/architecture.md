@@ -59,8 +59,36 @@ loop:
 ```
 
 A task that calls `ctx.spawn(child)` gets a new TCB. The strategy's `onSpawn` picks the
-target worker, and the engine pushes to that worker, falling back to `pushLocal` if the
-target's queue is full.
+target worker, and the engine pushes there. If that queue is full, it tries this worker's own
+master queue. If that is full too, the child runs immediately on the spawning worker
+("undeferred"), as OpenMP runtimes do when their task queues fill up. This bounds memory, and
+`RunResult.inlineExecutions` counts how often it happened.
+
+**Initial tasks.** The engine wraps the workload's initial tasks in a root task on worker 0,
+which spawns them through `onSpawn` like any other child. So the active strategy also decides
+how the initial work is spread. This mirrors an OpenMP program creating its tasks from one
+thread, and it is what makes round-robin and stealing distribute the same workload
+differently. The root task is excluded from all task counts.
+
+Consequence: worker 0 is on the critical path, because it spawns everything and also runs
+its own share. Measured in week 1 on an Apple Silicon Mac (100k tasks of 10 µs, 8 workers):
+the ideal is 125 ms, and the measured medians were 163 ms with `LockingQueue` and 143.5 ms
+with `SpscQueue`. Earlier measurements of about 200 ms were taken while jcstress and profiler
+runs were still loading the machine (load average about 5). Final experiments must run on an
+idle machine, and should record the load average.
+
+The profile (JFR, 1M empty tasks) shows the time is **not** in the queue, which takes under
+1% of worker 0's samples. It is in creating each task's TCB: about 0.4 µs per spawn with 8
+workers, against about 0.05 µs with 1 worker, for the same code. Two cheap explanations were
+tested and ruled out, or found to be minor:
+- false sharing on the id counter: padding it changed little
+- volatile-field fences: no measurable change, though removing them is still correct
+
+`System.nanoTime()` per task cost a few percent and was removed. The remaining hypothesis is
+cache-coherence traffic. Worker 0 writes each TCB into fresh memory, other cores then claim it
+with a CAS and take ownership of the cache line, and worker 0 keeps paying misses as it
+allocates. If Phase 4's overhead benchmark confirms this matters, the fix is per-worker TCB
+reuse (free lists) instead of allocating every task.
 
 ## Steal handshake (to be finalised by A + B in week 1)
 
@@ -97,9 +125,12 @@ The engine keeps one counter of outstanding tasks:
 
 A child is counted before its parent finishes, so the counter cannot reach 0 while work
 still exists. The run is over when the counter is 0 after all initial tasks were submitted.
-Workers read the counter only when they are idle. If the single shared counter shows up as
-contention in benchmarks, it can be split into per-worker counts that are summed when
-checked.
+Workers read the counter only when they are idle, but every spawn and every completion still
+updates it, so it is a shared cache line that all workers write. Profiling in week 1 did not
+show it as the main cost (see "Initial tasks" above). If it ever becomes one, replace it with
+per-worker created/completed counters and a double-scan termination check (Mattern's
+four-counter method). Do **not** just swap in a `LongAdder`: its sum is not atomic and can
+read zero falsely.
 
 ## Adaptive controller signals
 

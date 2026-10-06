@@ -13,8 +13,10 @@ single-producer/single-consumer queues:
 On top of these, an adaptive controller watches queue imbalance, steal success rate and idle
 workers, and moves the whole system between the strategies while it runs.
 
-> **Status:** Phase 0 (scaffold). The contracts in `sched-common` and the `LockingQueue` stub
-> exist; everything else is planned. See [docs/architecture.md](docs/architecture.md).
+> **Status:** Phase 1 done. The engine runs end to end on the lock-free `SpscQueue` (verified
+> with jcstress) under static round-robin, and `experiments/uniform-static.json` writes CSVs.
+> Next (Phase 2): the work-stealing strategies.
+> See [docs/architecture.md](docs/architecture.md).
 
 ## Build
 
@@ -28,12 +30,12 @@ You need JDK 21+. The Maven wrapper downloads Maven for you.
 ## Run
 
 ```sh
-# scheduler (once wired up in Phase 1)
+# scheduler: runs an experiment, writes results/<name>/runs.csv and workers-<n>.csv
 java -jar sched-cli/target/scheduler.jar --config experiments/uniform-static.json
 
 # concurrency stress tests (jcstress). Long-running; not part of `verify`.
 java -jar sched-stress/target/jcstress.jar                # everything
-java -jar sched-stress/target/jcstress.jar -t LockingQueue # one test
+java -jar sched-stress/target/jcstress.jar -t SpscQueueStress  # one class
 
 # benchmarks (JMH)
 java -jar sched-bench/target/benchmarks.jar QueueBenchmark

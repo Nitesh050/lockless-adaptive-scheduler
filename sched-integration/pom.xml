@@ -13,6 +13,12 @@
     <artifactId>sched-integration</artifactId>
     <description>End-to-end correctness tests: exactly-once execution, termination, mode switching.</description>
 
+    <properties>
+        <!-- test-only module: there is no artifact to install or deploy -->
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>${project.groupId}</groupId>

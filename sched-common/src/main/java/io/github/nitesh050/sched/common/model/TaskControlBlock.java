@@ -35,19 +35,22 @@ public final class TaskControlBlock {
     private final long parentId;
     private final Task task;
     private final int spawnedBy;
-    private final long createdNanos;
 
+    // Not volatile: every access goes through the VarHandles with an explicit mode. Initialising
+    // a volatile field would cost a full fence per task on ARM, and is unnecessary because a
+    // TCB only reaches another thread through a queue, whose release/acquire publishes it.
     @SuppressWarnings("unused") // accessed through STATE
-    private volatile TaskState state = TaskState.READY;
+    private TaskState state;
     @SuppressWarnings("unused") // accessed through EXECUTED_BY
-    private volatile int executedBy = NO_WORKER;
+    private int executedBy;
 
     public TaskControlBlock(long id, long parentId, Task task, int spawnedBy) {
         this.id = id;
         this.parentId = parentId;
         this.task = Objects.requireNonNull(task, "task");
         this.spawnedBy = spawnedBy;
-        this.createdNanos = System.nanoTime();
+        STATE.set(this, TaskState.READY);
+        EXECUTED_BY.set(this, NO_WORKER);
     }
 
     public long id() {
@@ -65,10 +68,6 @@ public final class TaskControlBlock {
     /** Worker that created this task, or {@link #NO_WORKER} if the workload submitted it. */
     public int spawnedBy() {
         return spawnedBy;
-    }
-
-    public long createdNanos() {
-        return createdNanos;
     }
 
     public TaskState state() {

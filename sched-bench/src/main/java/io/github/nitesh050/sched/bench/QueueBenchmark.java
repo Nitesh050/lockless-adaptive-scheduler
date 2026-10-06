@@ -1,7 +1,8 @@
 package io.github.nitesh050.sched.bench;
 
 import io.github.nitesh050.sched.common.api.TaskQueue;
-import io.github.nitesh050.sched.queue.LockingQueue;
+import io.github.nitesh050.sched.queue.QueueType;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -17,10 +18,7 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
-/**
- * Producer/consumer throughput of each queue implementation: one thread offers, one polls.
- * Add "spsc" to {@code impl} once SpscQueue exists.
- */
+/** Producer/consumer throughput of each queue implementation: one thread offers, one polls. */
 @State(Scope.Group)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -31,7 +29,7 @@ public class QueueBenchmark {
 
     private static final Integer ITEM = 42;
 
-    @Param({"locking"})
+    @Param({"locking", "spsc"})
     public String impl;
 
     @Param({"1024"})
@@ -41,10 +39,7 @@ public class QueueBenchmark {
 
     @Setup
     public void setup() {
-        queue = switch (impl) {
-            case "locking" -> new LockingQueue<>(capacity);
-            default -> throw new IllegalArgumentException("unknown queue: " + impl);
-        };
+        queue = QueueType.valueOf(impl.toUpperCase(Locale.ROOT)).create(capacity);
     }
 
     @Benchmark

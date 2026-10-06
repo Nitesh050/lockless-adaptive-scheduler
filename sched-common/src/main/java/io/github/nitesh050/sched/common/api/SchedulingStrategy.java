@@ -41,9 +41,12 @@ public interface SchedulingStrategy {
     }
 
     /**
-     * Chooses where a newly spawned task goes.
+     * Chooses where a newly spawned task goes. A stealing strategy may also answer pending
+     * steal requests here: X-OpenMP victims check on enqueue as well as dequeue, and a worker
+     * busy spawning many tasks (such as the root task) otherwise never reaches onDequeue.
      *
-     * @return target worker index; the engine pushes there, or locally if that queue is full
+     * @return target worker index. The engine pushes there; if that queue is full it tries this
+     *     worker's own queue, and if that is full too it runs the child immediately.
      */
     int onSpawn(WorkerView w, TaskControlBlock child);
 

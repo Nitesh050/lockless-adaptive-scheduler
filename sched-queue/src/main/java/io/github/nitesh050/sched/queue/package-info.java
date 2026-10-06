@@ -1,9 +1,10 @@
 /**
  * Queues (owner: A).
  *
- * <p>Planned: {@code SpscQueue} (lock-free single-producer single-consumer ring buffer),
- * {@code WorkerQueueSet} (one queue per producer for each worker), {@code QueueHint}
- * ("last queue pushed to" optimisation). {@link io.github.nitesh050.sched.queue.LockingQueue}
- * is the day-1 stub.
+ * <p>Done: {@link io.github.nitesh050.sched.queue.SpscQueue} (lock-free ring buffer, the
+ * default), {@link io.github.nitesh050.sched.queue.LockingQueue} (day-1 stub and benchmark
+ * baseline), {@link io.github.nitesh050.sched.queue.WorkerQueueSet},
+ * {@link io.github.nitesh050.sched.queue.QueueType}.
+ * <br>Planned: {@code QueueHint} ("last queue pushed to" optimisation).
  */
 package io.github.nitesh050.sched.queue;
