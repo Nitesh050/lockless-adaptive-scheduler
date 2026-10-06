@@ -1,0 +1,22 @@
+{
+  "name": "shiftvar-m20-s70-wait",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "WAIT_BASED_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "shifting",
+    "tasks": 100000,
+    "taskMicros": 10,
+    "shiftAtFraction": 0.7,
+    "heavyEveryNth": 8,
+    "heavyOffset": 1,
+    "heavyMultiplier": 20
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "fibonacci-w2-nowait",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 2,
+    "initialMode": "NO_WAIT_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "fibonacci",
+    "n": 22,
+    "nodeMicros": 5
+  }
+}

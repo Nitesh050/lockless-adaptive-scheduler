@@ -7,6 +7,11 @@ Format: `## vX — YYYY-MM-DD — summary`, then what changed, why, and who agre
 
 ---
 
+## v0.3 — 2026-10-06 — tuned adaptive thresholds
+
+- **`AdaptiveThresholds.defaults()` now uses `idleRatioHigh` 0.4** (was 0.25). Tuned on a
+  separate tuning workload; see docs/results.md. Values only, no signature change.
+
 ## v0.2 — 2026-10-06 — TaskControlBlock made cheaper to create
 
 - **Removed `TaskControlBlock.createdNanos()`.** Nothing read it, and calling

@@ -1,0 +1,19 @@
+{
+  "name": "fibonacci-w8-nowait-half",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "NO_WAIT_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42,
+    "stealBatch": "half"
+  },
+  "workload": {
+    "type": "fibonacci",
+    "n": 25,
+    "nodeMicros": 5
+  }
+}

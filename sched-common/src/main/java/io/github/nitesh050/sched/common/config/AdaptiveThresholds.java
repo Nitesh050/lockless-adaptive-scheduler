@@ -19,9 +19,9 @@ public record AdaptiveThresholds(
         double stealSuccessLow,
         double idleRatioHigh) {
 
-    /** Starting values only; Phase 4 tunes these on separate tuning runs. */
+    /** Tuned in Phase 4 on a separate tuning workload (see docs/results.md). */
     public static AdaptiveThresholds defaults() {
-        return new AdaptiveThresholds(5, 3, 2.0, 1.3, 0.2, 0.25);
+        return new AdaptiveThresholds(5, 3, 2.0, 1.3, 0.2, 0.4);
     }
 
     public AdaptiveThresholds {

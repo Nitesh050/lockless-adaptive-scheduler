@@ -1,0 +1,30 @@
+{
+  "name": "shiftvar-m10-s70-adaptive",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "STATIC_ROUND_ROBIN",
+    "adaptive": true,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42,
+    "thresholds": {
+      "sampleIntervalMillis": 5,
+      "consecutiveSamples": 3,
+      "imbalanceEnter": 2.0,
+      "imbalanceExit": 1.3,
+      "stealSuccessLow": 0.2,
+      "idleRatioHigh": 0.4
+    }
+  },
+  "workload": {
+    "type": "shifting",
+    "tasks": 100000,
+    "taskMicros": 10,
+    "shiftAtFraction": 0.7,
+    "heavyEveryNth": 8,
+    "heavyOffset": 1,
+    "heavyMultiplier": 10
+  }
+}

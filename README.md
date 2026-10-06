@@ -13,11 +13,10 @@ single-producer/single-consumer queues:
 On top of these, an adaptive controller watches queue imbalance, steal success rate and idle
 workers, and moves the whole system between the strategies while it runs.
 
-> **Status:** Phase 3 done. All three strategies run on the lock-free `SpscQueue`, and the
-> adaptive controller switches between them at runtime. On the shifting workload it is about
-> 18% faster than the best fixed strategy, and it matches the best fixed strategy elsewhere.
-> Deadlock detection, jcstress tests and JMH benchmarks are in place. Next (Phase 4): final
-> experiments and charts.
+> **Status:** Phase 4 done. On a workload that changes shape mid-run, adaptive switching is
+> 19% faster than the best fixed strategy at 8 workers, and it matches the best fixed strategy
+> elsewhere: 710 of 710 runs clean. Results, charts and method are in
+> [docs/results.md](docs/results.md). Next: the report (Phase 5).
 > See [docs/architecture.md](docs/architecture.md).
 
 ## Build
@@ -42,9 +41,11 @@ java -jar sched-stress/target/jcstress.jar -t SpscQueueStress  # one class
 # benchmarks (JMH): QueueBenchmark, StrategyBenchmark, OverheadBenchmark, ForkJoinBaseline
 java -jar sched-bench/target/benchmarks.jar StrategyBenchmark
 
-# all experiment configs, then charts
-scripts/run_experiments.sh
-python3 scripts/plot_results.py results/
+# Phase 4 experiments, then charts (see docs/results.md)
+python3 scripts/make_sweep.py
+scripts/run_experiments.sh experiments/final
+scripts/run_traces.sh
+python3 scripts/plot_results.py
 ```
 
 ## Modules

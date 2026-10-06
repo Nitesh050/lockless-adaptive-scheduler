@@ -1,0 +1,22 @@
+{
+  "name": "shiftvar-m5-s50-nowait",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "NO_WAIT_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "shifting",
+    "tasks": 100000,
+    "taskMicros": 10,
+    "shiftAtFraction": 0.5,
+    "heavyEveryNth": 8,
+    "heavyOffset": 1,
+    "heavyMultiplier": 5
+  }
+}

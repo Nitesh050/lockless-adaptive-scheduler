@@ -87,6 +87,23 @@ class MainTest {
     }
 
     @Test
+    void warmUpRunsAreExecutedButNotRecorded(@TempDir Path dir) throws Exception {
+        Path cfg = dir.resolve("w.json");
+        Files.writeString(cfg, """
+                {"name": "w", "repeats": 2, "warmup": 3, "scheduler": {"workers": 2},
+                 "workload": {"type": "uniform", "tasks": 200, "taskMicros": 0}}
+                """);
+        Path out = dir.resolve("out");
+        assertTrue(Main.run(Main.Args.parse(new String[] {"--config", cfg.toString(), "--out", out.toString()})));
+
+        List<String> runs = Files.readAllLines(out.resolve("runs.csv"));
+        assertEquals(3, runs.size(), "header + the 2 recorded repeats only");
+        assertTrue(runs.get(1).startsWith("w,1,"));
+        assertTrue(runs.get(0).endsWith(",mode_switches,load_avg"));
+        assertTrue(Files.notExists(out.resolve("workers-0.csv")), "warm-ups write no files");
+    }
+
+    @Test
     void stealBatchAcceptsHalf(@TempDir Path dir) throws Exception {
         Path cfg = dir.resolve("half.json");
         Files.writeString(cfg, """

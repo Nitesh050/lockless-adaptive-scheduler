@@ -14,7 +14,7 @@
       "imbalanceEnter": 2.0,
       "imbalanceExit": 1.3,
       "stealSuccessLow": 0.2,
-      "idleRatioHigh": 0.25
+      "idleRatioHigh": 0.4
     }
   },
   "workload": {

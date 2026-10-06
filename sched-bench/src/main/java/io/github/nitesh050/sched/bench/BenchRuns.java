@@ -52,7 +52,7 @@ final class BenchRuns {
                 .queueCapacity(1024)
                 .stealWaitNanos(10_000)
                 .seed(42)
-                .thresholds(new AdaptiveThresholds(5, 3, 2.0, 1.3, 0.2, 0.25))
+                .thresholds(AdaptiveThresholds.defaults())
                 .build();
     }
 

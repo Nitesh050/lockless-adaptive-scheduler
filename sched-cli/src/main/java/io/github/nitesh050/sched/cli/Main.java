@@ -17,6 +17,7 @@ import io.github.nitesh050.sched.metrics.WorkerMetrics;
 import io.github.nitesh050.sched.queue.QueueType;
 import io.github.nitesh050.sched.resources.DefaultResourceManager;
 import io.github.nitesh050.sched.workloads.DeadlockScenario;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -43,7 +44,7 @@ public final class Main {
             "completed", "tasks_executed", "elapsed_ms", "throughput_per_s",
             "inline_executions", "failed", "duplicate_claims",
             "steal_attempts", "steal_successes", "steal_success_rate", "imbalance_spread", "imbalance_cv",
-            "mode_switches");
+            "mode_switches", "load_avg");
 
     private static final long TRACE_BUCKET_NANOS = 1_000_000;
 
@@ -72,6 +73,7 @@ public final class Main {
         ExperimentConfig exp = ExperimentConfig.load(a.config);
         SchedulerConfig config = exp.scheduler().toConfig();
         int repeats = a.repeats != null ? a.repeats : exp.repeats();
+        int warmup = a.warmup != null ? a.warmup : exp.warmup();
         Path out = a.out != null ? a.out : Path.of("results", exp.name());
 
         int stealBatch = exp.scheduler().stealBatchOrDefault();
@@ -80,14 +82,18 @@ public final class Main {
                 exp.name(), config.workers(), config.adaptive() ? "adaptive from " : "", config.initialMode(),
                 stealBatch == 1 ? "" : " (batch " + (stealBatch == 0 ? "half" : stealBatch) + ")",
                 a.queue.name().toLowerCase(Locale.ROOT), repeats, out);
+        if (warmup > 0) {
+            System.out.printf(Locale.ROOT, "  (%d warm-up run(s) first, not recorded)%n", warmup);
+        }
 
         List<List<?>> rows = new ArrayList<>();
         double[] millis = new double[repeats];
         boolean allClean = true;
-        for (int r = 1; r <= repeats; r++) {
+        for (int r = 1 - warmup; r <= repeats; r++) {
+            boolean recorded = r >= 1; // r <= 0 are warm-up runs: executed and checked, not recorded
             Workload workload = Workloads.create(exp.workload());
             MetricsRegistry metrics = new MetricsRegistry(config.workers());
-            TraceRecorder trace = a.trace
+            TraceRecorder trace = a.trace && recorded
                     ? new TraceRecorder(config.workers(), TRACE_BUCKET_NANOS, a.timeout.toNanos())
                     : null;
             MetricsSink sink = trace == null ? metrics : MetricsSinks.fanOut(metrics, trace);
@@ -116,13 +122,22 @@ public final class Main {
                     controller.start();
                     result = pool.run(workload, a.timeout);
                 }
-                Reports.writeControllerLog(out.resolve("adaptive-" + r + ".csv"), controller);
+                if (recorded) {
+                    Reports.writeControllerLog(out.resolve("adaptive-" + r + ".csv"), controller);
+                }
             }
+            double load = ManagementFactory.getOperatingSystemMXBean().getSystemLoadAverage();
             MetricsReport report = metrics.report();
 
             long expected = workload.expectedTaskCount().orElse(result.tasksExecuted());
             boolean clean = result.isClean() && result.tasksExecuted() == expected;
             allClean &= clean;
+            if (!recorded) {
+                if (!clean) {
+                    System.out.println("  warm-up run NOT CLEAN: " + describeProblem(result, expected));
+                }
+                continue;
+            }
             millis[r - 1] = result.elapsedMillis();
 
             long[] perWorker = result.perWorkerExecuted();
@@ -152,7 +167,8 @@ public final class Main {
                     Double.isNaN(report.stealSuccessRate()) ? "" : String.format(Locale.ROOT, "%.4f", report.stealSuccessRate()),
                     String.format(Locale.ROOT, "%.4f", DeltaCalculator.relativeSpread(perWorker)),
                     String.format(Locale.ROOT, "%.4f", DeltaCalculator.coefficientOfVariation(perWorker)),
-                    controller == null ? 0 : controller.switches()));
+                    controller == null ? 0 : controller.switches(),
+                    String.format(Locale.ROOT, "%.2f", load)));
             CsvExporter.writeWorkers(out.resolve("workers-" + r + ".csv"), report);
             if (trace != null) {
                 trace.writeCsv(out.resolve("trace-" + r + ".csv"));
@@ -190,6 +206,7 @@ public final class Main {
                 usage: java -jar scheduler.jar --config <experiment.json> [options]
                   --out <dir>             output directory (default results/<experiment name>)
                   --repeats <n>           override the config's repeat count
+                  --warmup <n>            override the config's warm-up run count (run, checked, not recorded)
                   --queue <spsc|locking>  queue implementation (default spsc)
                   --timeout-seconds <s>   declare a run hung after this long (default 300)
                   --trace                 also write per-millisecond traces for the over-time chart
@@ -198,6 +215,7 @@ public final class Main {
         Path config;
         Path out;
         Integer repeats;
+        Integer warmup;
         QueueType queue = QueueType.SPSC;
         Duration timeout = Duration.ofSeconds(300);
         boolean help;
@@ -223,6 +241,7 @@ public final class Main {
                     case "--config" -> a.config = Path.of(value);
                     case "--out" -> a.out = Path.of(value);
                     case "--repeats" -> a.repeats = Integer.parseInt(value);
+                    case "--warmup" -> a.warmup = Integer.parseInt(value);
                     case "--queue" -> a.queue = QueueType.valueOf(value.toUpperCase(Locale.ROOT));
                     case "--timeout-seconds" -> a.timeout = Duration.ofSeconds(Long.parseLong(value));
                     default -> throw new IllegalArgumentException("unknown option " + flag);

@@ -14,7 +14,8 @@ import java.util.Objects;
  * One file in {@code experiments/}. {@code scheduler} maps onto {@link SchedulerConfig} (missing
  * fields take the builder's defaults); {@code workload} is interpreted by {@link Workloads}.
  */
-record ExperimentConfig(String name, Integer repeats, SchedulerSection scheduler, Map<String, Object> workload) {
+record ExperimentConfig(String name, Integer repeats, Integer warmup, SchedulerSection scheduler,
+                        Map<String, Object> workload) {
 
     private static final ObjectMapper JSON = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
@@ -28,6 +29,12 @@ record ExperimentConfig(String name, Integer repeats, SchedulerSection scheduler
         }
         if (repeats < 1) {
             throw new IllegalArgumentException("repeats must be >= 1");
+        }
+        if (warmup == null) {
+            warmup = 0;
+        }
+        if (warmup < 0) {
+            throw new IllegalArgumentException("warmup must be >= 0");
         }
     }
 

@@ -1,0 +1,22 @@
+{
+  "name": "tune-static",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 8,
+    "initialMode": "STATIC_ROUND_ROBIN",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "shifting",
+    "tasks": 80000,
+    "taskMicros": 10,
+    "shiftAtFraction": 0.4,
+    "heavyEveryNth": 8,
+    "heavyOffset": 1,
+    "heavyMultiplier": 8
+  }
+}

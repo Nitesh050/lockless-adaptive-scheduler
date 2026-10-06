@@ -1,0 +1,22 @@
+{
+  "name": "shifting-w4-wait",
+  "repeats": 10,
+  "warmup": 2,
+  "scheduler": {
+    "workers": 4,
+    "initialMode": "WAIT_BASED_STEAL",
+    "adaptive": false,
+    "queueCapacity": 1024,
+    "stealWaitNanos": 10000,
+    "seed": 42
+  },
+  "workload": {
+    "type": "shifting",
+    "tasks": 50000,
+    "taskMicros": 10,
+    "shiftAtFraction": 0.5,
+    "heavyEveryNth": 4,
+    "heavyOffset": 1,
+    "heavyMultiplier": 10
+  }
+}
