@@ -1,0 +1,27 @@
+# Module owners review every PR touching their module.
+# Replace the handles below with each person's GitHub username.
+# A = @Nitesh050 (placeholder), B = @TODO-B, C = @TODO-C
+
+# A: common, queue, engine, queue stress tests
+/sched-common/        @Nitesh050
+/sched-queue/         @Nitesh050
+/sched-engine/        @Nitesh050
+
+# B: strategies, adaptive, steal + mode-switch stress tests
+/sched-strategies/    @Nitesh050
+/sched-adaptive/      @Nitesh050
+/sched-stress/        @Nitesh050
+
+# C: resources, metrics, workloads, integration, bench, cli, experiments, scripts
+/sched-resources/     @Nitesh050
+/sched-metrics/       @Nitesh050
+/sched-workloads/     @Nitesh050
+/sched-integration/   @Nitesh050
+/sched-bench/         @Nitesh050
+/sched-cli/           @Nitesh050
+/experiments/         @Nitesh050
+/scripts/             @Nitesh050
+
+# Contract changes need the whole team.
+/sched-common/src/main/java/io/github/nitesh050/sched/common/api/  @Nitesh050
+/docs/contracts-changelog.md                                      @Nitesh050

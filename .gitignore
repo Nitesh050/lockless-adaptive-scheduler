@@ -1,0 +1,24 @@
+# build
+target/
+*.class
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+
+# experiment output (commit final results explicitly with git add -f)
+results/*
+!results/.gitkeep
+jcstress-results-*.bin.gz
+results/jcstress/
+
+# python
+__pycache__/
+.venv/
