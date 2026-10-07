@@ -17,6 +17,9 @@ it matches the best fixed strategy to within 1%. Its monitoring cost is not meas
 
 ![Run time by strategy, 8 workers](docs/report/figures/main-8-workers.png)
 
+> **New here? See [WORKFLOW.md](WORKFLOW.md)** for step-by-step flow diagrams of how a run,
+> the worker loop, work stealing, the adaptive controller and deadlock detection work.
+
 ---
 
 ## Contents
@@ -257,6 +260,30 @@ report steal-half as a separate finding.
 
 You need **JDK 21+**. The Maven wrapper downloads Maven itself.
 
+**See it in a browser: the web dashboard** (Vite + React, served by the scheduler itself):
+
+```sh
+scripts/ui.sh              # starts it and opens http://localhost:8080
+```
+
+| Tab | What you can do |
+|---|---|
+| Run & compare | Pick a workload, worker count and strategy; run one or **compare all strategies** side by side. See run time against ideal, progress over time with the controller's switches, tasks per worker, and the adaptive controller's active strategy, utilization and every decision with its reason. |
+| Deadlock demo | Run dining philosophers and see each detected wait-for cycle, drawn as a ring, with the aborted philosopher. |
+| Saved results | The 710-run Phase 4 results table and the sensitivity heatmap. |
+
+It runs the real scheduler on your machine and is reachable only from localhost. Frontend
+source is in [`ui/`](ui/). To change it: `cd ui && npm install && npm run dev` (hot reload on
+:5173, API proxied to a running `scripts/ui.sh`), then `npm run build` to compile it back into
+the jar.
+
+**Quickest way to see it work: the live demo** (about 20 s of runtime, pausing between steps):
+
+```sh
+scripts/demo.sh            # build, then: the problem, adaptive vs fixed, controller decisions, deadlocks, charts
+scripts/demo.sh --tests    # same, plus the full 264-test suite first
+```
+
 ```sh
 ./mvnw verify                        # build everything, run all 264 tests
 ./mvnw -pl sched-queue -am test      # one module and its dependencies
@@ -305,7 +332,8 @@ run records its load average in `runs.csv`.
 | `sched-resources` | `DefaultResourceManager`, `AllocationGraph`, `DeadlockDetector` |
 | `sched-metrics` | `MetricsRegistry`, `TraceRecorder`, `DeltaCalculator`, `CsvExporter` |
 | `sched-workloads` | Uniform, Fibonacci tree, shifting, dining philosophers |
-| `sched-cli` | Command-line entry point: runs experiment configs |
+| `sched-cli` | Command-line entry point: runs experiment configs; `--ui` serves the web dashboard |
+| `ui/` | Web dashboard (Vite + React + TypeScript + Recharts); builds into `sched-cli`'s resources |
 | `sched-integration` | End-to-end tests: exactly-once, termination, mode switching, deadlocks |
 | `sched-stress` | jcstress tests |
 | `sched-bench` | JMH benchmarks and the `ForkJoinPool` baseline |
@@ -322,6 +350,7 @@ stress.
 
 | Document | What it covers |
 |---|---|
+| [WORKFLOW.md](WORKFLOW.md) | Flow diagrams: a run end to end, the queue layout, the worker loop, spawning, task states, the steal handshake, the adaptive controller, safe switching, deadlock detection, termination, the experiment pipeline |
 | [docs/results.md](docs/results.md) | Full method, all result tables, charts, limitations |
 | [docs/architecture.md](docs/architecture.md) | Design of every component, measurements and decisions along the way |
 | [docs/memory-model.md](docs/memory-model.md) | Why each fence and access mode is there: x86 TSO compared with the JVM on ARM |

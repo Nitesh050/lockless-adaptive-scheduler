@@ -1,0 +1,9 @@
+{
+  "name": "lockless-adaptive-scheduler",
+  "private": true,
+  "description": "Convenience scripts; the project itself is Java (Maven). The web UI lives in ui/.",
+  "scripts": {
+    "start": "npm --prefix ui run start",
+    "build:ui": "npm --prefix ui install --no-audit --no-fund && npm --prefix ui run build"
+  }
+}

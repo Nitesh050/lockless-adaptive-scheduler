@@ -65,6 +65,10 @@ public final class Main {
             System.out.println(Args.USAGE);
             return;
         }
+        if (a.ui) {
+            Dashboard.serve(a.port);
+            return;
+        }
         System.exit(run(a) ? 0 : 1);
     }
 
@@ -204,6 +208,7 @@ public final class Main {
     static final class Args {
         static final String USAGE = """
                 usage: java -jar scheduler.jar --config <experiment.json> [options]
+                       java -jar scheduler.jar --ui [--port 8080]     local web dashboard
                   --out <dir>             output directory (default results/<experiment name>)
                   --repeats <n>           override the config's repeat count
                   --warmup <n>            override the config's warm-up run count (run, checked, not recorded)
@@ -220,6 +225,8 @@ public final class Main {
         Duration timeout = Duration.ofSeconds(300);
         boolean help;
         boolean trace;
+        boolean ui;
+        int port = 8080;
 
         static Args parse(String[] argv) {
             Args a = new Args();
@@ -233,6 +240,10 @@ public final class Main {
                     a.trace = true;
                     continue;
                 }
+                if (flag.equals("--ui")) {
+                    a.ui = true;
+                    continue;
+                }
                 if (i + 1 >= argv.length) {
                     throw new IllegalArgumentException(flag + " needs a value");
                 }
@@ -242,13 +253,14 @@ public final class Main {
                     case "--out" -> a.out = Path.of(value);
                     case "--repeats" -> a.repeats = Integer.parseInt(value);
                     case "--warmup" -> a.warmup = Integer.parseInt(value);
+                    case "--port" -> a.port = Integer.parseInt(value);
                     case "--queue" -> a.queue = QueueType.valueOf(value.toUpperCase(Locale.ROOT));
                     case "--timeout-seconds" -> a.timeout = Duration.ofSeconds(Long.parseLong(value));
                     default -> throw new IllegalArgumentException("unknown option " + flag);
                 }
             }
-            if (a.config == null) {
-                throw new IllegalArgumentException("--config is required");
+            if (a.config == null && !a.ui) {
+                throw new IllegalArgumentException("--config (or --ui) is required");
             }
             return a;
         }

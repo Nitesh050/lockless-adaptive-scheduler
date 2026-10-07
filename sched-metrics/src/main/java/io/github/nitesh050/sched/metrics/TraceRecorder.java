@@ -68,6 +68,34 @@ public final class TraceRecorder implements MetricsSink {
         return List.copyOf(switches);
     }
 
+    /** Width of one bucket in milliseconds. */
+    public double bucketMillis() {
+        return bucketNanos / 1e6;
+    }
+
+    /**
+     * Tasks finished in each time bucket, summed over workers, up to the last bucket in which
+     * anything finished. Read after the run.
+     */
+    public long[] finishedPerBucket() {
+        int last = -1;
+        for (long[] row : finished) {
+            for (int b = buckets - 1; b > last; b--) {
+                if (row[b] != 0) {
+                    last = b;
+                    break;
+                }
+            }
+        }
+        long[] total = new long[last + 1];
+        for (long[] row : finished) {
+            for (int b = 0; b <= last; b++) {
+                total[b] += row[b];
+            }
+        }
+        return total;
+    }
+
     /**
      * Writes {@code time_ms,worker,finished}: one row per bucket per worker, up to the last
      * bucket in which anything finished.
